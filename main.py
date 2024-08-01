@@ -20,6 +20,7 @@ from jtech_fxns_v2 import *
 from tagging_fxns_v2 import * 
 from ab_split_fxns_v2 import *
 from test_vars import *
+from past_behavior_query import *
 
 
 def get_daily_strings():
@@ -36,7 +37,7 @@ if __name__ == '__main__':
     storage_client = storage.Client()
     bucket = storage_client.get_bucket(bucket_name)
 
-    cadence_group = 'pbo' ##remove this? 
+    cadence_group = 'session15' ##remove this? 
 
     test_name = '20240371NewScriptTest'
     package_names, platforms, k_clusters_list, cohort_names, cohort_types, iap_exp, segment, array_cols, excluded_offers = get_test_variables(test_name) ##how can we make this cleaner? 
@@ -55,5 +56,12 @@ if __name__ == '__main__':
         ab_lookup = fetch_existing_ab_cohorts(df_jtech, package_name, platform, bucket, cohort_names=cohort_names, illegal_chars=['.', '-'], test_name=test_name, segment=segment, jwt = jwt)
 
         output_df, df_new_cohorts = get_tags_from_ab_splits(df_jtech, ab_lookup, package_name, platform, storage_client, bucket_name=bucket, fxn=get_tags_cadence_test, cohort_names = cohort_names, cohort_types = cohort_types, test_name=test_name, segment=segment, cadence_type=cadence_group)
+
+        output_df = merge_pb_iap_stats(pb, cadence_group, output_df)
+
         
         print(output_df.groupby(['ab_cohort','tag']).count()['user_id'])
+
+        # print(output_df.groupby(['segment','tag']).count()['user_id'])
+
+        cadence_tags, cadence_ids = generate_api_inputs_diff_cadences(pl, cohort_names, cohort_types, cadence_group, test_name)

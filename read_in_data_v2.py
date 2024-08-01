@@ -47,3 +47,49 @@ def read_in_single_csv(table_name, package_name, platform, bucket, clean_cols=No
     output_df = pd.read_csv(string_data)
     # print(f'{table_name} ingested to pandas dataframe...')
     return output_df
+
+
+
+
+def upload_to_gcb(df, storage_client, bucket_name, package_name, platform, name, folder=None, illegal_chars = ['.', '-']):
+    csv_data = df.to_csv(index=False)
+
+    #remove illegal chars from package name
+    for char in illegal_chars:
+        package_name = str.replace(package_name, char, "")
+
+    #specify save location
+    if folder:
+        blob_name = f'{folder}/{name}{package_name}{platform}'
+    else:
+        blob_name = f'{name}{package_name}{platform}'
+
+
+    # create a new blob and upload the file's content.
+    blob = bucket_name.blob(blob_name)
+    blob.upload_from_string(csv_data, content_type='text/csv')
+
+    print(f"Uploaded CSV to {blob_name} in bucket {bucket_name}")
+
+    return None
+
+
+def cvr_by_cadence_group(pb, cadence_group):
+    df = pb.groupby(['user_id', 'cadence_group', 'event_name']).sum()['cadence_stats'].reset_index()
+    df_pivot = df.pivot_table('cadence_stats', ['user_id', 'cadence_group'], 'event_name').fillna(0).reset_index()
+    df_pivot['ctr'] = (df_pivot['click'] / df_pivot['sent']).fillna(0)
+    df_pivot.replace([np.inf, -np.inf], 0, inplace=True)
+    
+    ctr_output = df_pivot.pivot_table('ctr', ['user_id'], 'cadence_group').fillna(0).reset_index()[['user_id', cadence_group]]
+    ctr_output.columns = ['user_id', 'group_ctr']
+    iap_output = df_pivot.pivot_table('iap', ['user_id'], 'cadence_group').fillna(0).reset_index()[['user_id', cadence_group]]
+    iap_output.columns = ['user_id', 'group_iap']
+
+    return ctr_output, iap_output
+
+
+def merge_pb_iap_stats(pb, cadence_group, output_df):
+    ctr_output, iap_output = cvr_by_cadence_group(pb, cadence_group)
+    df = pd.merge(output_df, ctr_output, on='user_id', how='left').fillna(0)
+    df = pd.merge(df, iap_output, on='user_id', how='left').fillna(0)
+    return df

@@ -1,5 +1,9 @@
 from google.cloud import bigquery
 import pandas as pd
+from google.cloud import storage
+from io import StringIO
+import os
+# from read_in_data_v2 import *
 
 
 
@@ -12,8 +16,8 @@ query = """
                             , lax_string(publisher_parameters['cs_iap_product_id']) product_id --change to product_id
                             , lax_string(publisher_parameters['cadence_group']) cadence_group
                         from `prj-cs-shared-public-a17f.cs_analytics.analytics_events_permanent` e
-                        join (select distinct user_id from `prj-cs-shared-public-a17f.cs_analytics.analytics_events_permanent` where date(created_at)>=current_date - 120 and event_name = 'iap_purchase' and environment = 'production') i
-                        on e.user_id = i.user_id
+                        --join (select distinct user_id from `prj-cs-shared-public-a17f.cs_analytics.analytics_events_permanent` where date(created_at)>=current_date - 120 and event_name = 'iap_purchase' and environment = 'production') i
+                        --on e.user_id = i.user_id
                         where date(created_at)>=current_date - 90
                             and event_name = 'deeplink_click'
                             and environment = 'production'
@@ -63,10 +67,10 @@ query = """
           select user_id
               , package_name
               , lower(platform) as platform
-              , product_id
+              , product_id as offer
               , 'click' as event_name
               , cadence_group
-              , count(1) as count
+              , count(1) as cadence_stats
           from user_deeplink_clicks
           where product_id is not null
               and platform is not null
@@ -79,13 +83,13 @@ query = """
           select userId as user_id
               , packageName as package_name
               , lower(platform) as platform
-              , json_extract_scalar(metaInfo, '$.cs_iap_product_id')  product_id
+              , json_extract_scalar(metaInfo, '$.cs_iap_product_id') as offer
               , 'sent' as event_name
               , json_extract_scalar(metaInfo, '$.cadenceGroup') cadence_group
-              , count(1) as count
+              , count(1) as cadence_stats
           from `prj-cs-shared-public-a17f.cs_analytics.outreach_events` o
-          join (select distinct user_id from `prj-cs-shared-public-a17f.cs_analytics.analytics_events_permanent` where date(created_at)>=current_date - 120 and event_name = 'iap_purchase' and environment = 'production') i
-              on userId = i.user_id
+          --join (select distinct user_id from `prj-cs-shared-public-a17f.cs_analytics.analytics_events_permanent` where date(created_at)>=current_date - 120 and event_name = 'iap_purchase' and environment = 'production') i
+              --on userId = i.user_id
           where json_extract_scalar(metaInfo, '$.cs_iap_product_id') is not null
               and platform is not null
               and json_extract_scalar(metaInfo, '$.cs_iap_product_id') != 'null'
@@ -96,7 +100,7 @@ query = """
           select user_id
               , package_name
               , platform
-              , product_id
+              , product_id as offer
               , 'iap' as event_name
               , cadence_group
               , count(1) as cadence_stats
@@ -107,9 +111,37 @@ query = """
     """
 
 
+
+
 def get_past_behavior_all(query=query):
     client = bigquery.Client()
     query_job = client.query(query)
     df = query_job.to_dataframe()
 
     return df
+
+
+
+def upload_to_gcb(df, storage_client, bucket_name, name):
+    csv_data = df.to_csv(index=False)
+
+   
+    blob_name = f'{name}'
+
+
+    # create a new blob and upload the file's content.
+    blob = bucket_name.blob(blob_name)
+    blob.upload_from_string(csv_data, content_type='text/csv')
+
+    print(f"Uploaded {blob_name} to bucket {bucket_name}")
+
+    return None
+
+
+if __name__=='__main__':
+    storage_client = storage.Client()
+    bucket_name = storage_client.get_bucket('cs-analytics-bucket')
+
+    df = get_past_behavior_all(query)
+    upload_to_gcb(df, storage_client, bucket_name, 'past_behavior_v2')
+
